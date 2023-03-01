@@ -33,3 +33,6 @@ opt-level = 2 # fast and small wasm, basically same as `opt-level = 's'`
 # Optimize all dependencies even in debug builds (does not affect workspace packages):
 [profile.dev.package."*"]
 opt-level = 2
+
+[patch.crates-io]
+winit = { git = "https://github.com/rust-windowing/winit", rev = "2e4338bb8dddf820c9bcda23d6b7a0d8a6208831" }
