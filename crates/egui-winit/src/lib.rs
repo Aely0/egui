@@ -25,6 +25,16 @@ pub use window_settings::WindowSettings;
 
 use winit::event_loop::EventLoopWindowTarget;
 
+#[cfg(feature = "wayland")]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "dragonfly",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd"
+))]
+use winit::platform::unix::EventLoopWindowTargetExtUnix;
+
 pub fn native_pixels_per_point(window: &winit::window::Window) -> f32 {
     window.scale_factor() as f32
 }
@@ -59,8 +69,7 @@ pub struct State {
     egui_input: egui::RawInput,
     pointer_pos_in_points: Option<egui::Pos2>,
     any_pointer_button_down: bool,
-    current_cursor_icon: Option<egui::CursorIcon>,
-
+    current_cursor_icon: egui::CursorIcon,
     /// What egui uses.
     current_pixels_per_point: f32,
 
@@ -100,7 +109,7 @@ impl State {
             egui_input,
             pointer_pos_in_points: None,
             any_pointer_button_down: false,
-            current_cursor_icon: None,
+            current_cursor_icon: egui::CursorIcon::Default,
             current_pixels_per_point: 1.0,
 
             clipboard: clipboard::Clipboard::new(wayland_display),
@@ -368,9 +377,8 @@ impl State {
                     consumed: false,
                 }
             }
-
-            // Things that may require repaint:
-            WindowEvent::CloseRequested
+            WindowEvent::AxisMotion { .. }
+            | WindowEvent::CloseRequested
             | WindowEvent::CursorEntered { .. }
             | WindowEvent::Destroyed
             | WindowEvent::Occluded(_)
@@ -380,26 +388,10 @@ impl State {
                 repaint: true,
                 consumed: false,
             },
-
-            // Things we completely ignore:
-            WindowEvent::AxisMotion { .. }
-            | WindowEvent::Moved(_)
-            | WindowEvent::SmartMagnify { .. }
-            | WindowEvent::TouchpadRotate { .. } => EventResponse {
-                repaint: false,
+            WindowEvent::Moved(_) => EventResponse {
+                repaint: false, // moving a window doesn't warrant a repaint
                 consumed: false,
             },
-
-            WindowEvent::TouchpadMagnify { delta, .. } => {
-                // Positive delta values indicate magnification (zooming in).
-                // Negative delta values indicate shrinking (zooming out).
-                let zoom_factor = (*delta as f32).exp();
-                self.egui_input.events.push(egui::Event::Zoom(zoom_factor));
-                EventResponse {
-                    repaint: true,
-                    consumed: egui_ctx.wants_pointer_input(),
-                }
-            }
         }
     }
 
@@ -655,25 +647,22 @@ impl State {
     }
 
     fn set_cursor_icon(&mut self, window: &winit::window::Window, cursor_icon: egui::CursorIcon) {
-        if self.current_cursor_icon == Some(cursor_icon) {
-            // Prevent flickering near frame boundary when Windows OS tries to control cursor icon for window resizing.
-            // On other platforms: just early-out to save CPU.
+        // Prevent flickering near frame boundary when Windows OS tries to control cursor icon for window resizing.
+        // On other platforms: just early-out to save CPU.
+        if self.current_cursor_icon == cursor_icon {
             return;
         }
+        self.current_cursor_icon = cursor_icon;
 
-        let is_pointer_in_window = self.pointer_pos_in_points.is_some();
-        if is_pointer_in_window {
-            self.current_cursor_icon = Some(cursor_icon);
+        if let Some(cursor_icon) = translate_cursor(cursor_icon) {
+            window.set_cursor_visible(true);
 
-            if let Some(winit_cursor_icon) = translate_cursor(cursor_icon) {
-                window.set_cursor_visible(true);
-                window.set_cursor_icon(winit_cursor_icon);
-            } else {
-                window.set_cursor_visible(false);
+            let is_pointer_in_window = self.pointer_pos_in_points.is_some();
+            if is_pointer_in_window {
+                window.set_cursor_icon(cursor_icon);
             }
         } else {
-            // Remember to set the cursor again once the cursor returns to the screen:
-            self.current_cursor_icon = None;
+            window.set_cursor_visible(false);
         }
     }
 }
@@ -882,7 +871,6 @@ fn wayland_display<T>(_event_loop: &EventLoopWindowTarget<T>) -> Option<*mut c_v
         target_os = "openbsd"
     ))]
     {
-        use winit::platform::wayland::EventLoopWindowTargetExtWayland as _;
         return _event_loop.wayland_display();
     }
 

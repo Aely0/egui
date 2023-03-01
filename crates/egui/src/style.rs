@@ -305,7 +305,6 @@ pub struct Spacing {
 
     /// Margin between contents and scroll bar.
     pub scroll_bar_inner_margin: f32,
-
     /// Margin between scroll bar and the outer container (e.g. right of a vertical scroll bar).
     pub scroll_bar_outer_margin: f32,
 }
@@ -492,7 +491,6 @@ pub struct Visuals {
     pub resize_corner_size: f32,
 
     pub text_cursor_width: f32,
-
     /// show where the text cursor would be if you clicked
     pub text_cursor_preview: bool,
 
@@ -511,11 +509,6 @@ pub struct Visuals {
     /// Wether or not Grids and Tables should be striped by default
     /// (have alternating rows differently colored).
     pub striped: bool,
-
-    /// Show trailing color behind the circle of a [`Slider`]. Default is OFF.
-    ///
-    /// Enabling this will affect ALL sliders, and can be enabled/disabled per slider with [`Slider::trailing_fill`].
-    pub slider_trailing_fill: bool,
 }
 
 impl Visuals {
@@ -775,8 +768,6 @@ impl Visuals {
             indent_has_left_vline: true,
 
             striped: false,
-
-            slider_trailing_fill: false,
         }
     }
 
@@ -1342,8 +1333,6 @@ impl Visuals {
             indent_has_left_vline,
 
             striped,
-
-            slider_trailing_fill,
         } = self;
 
         ui.collapsing("Background Colors", |ui| {
@@ -1405,8 +1394,6 @@ impl Visuals {
         );
 
         ui.checkbox(striped, "By default, add stripes to grids and tables?");
-
-        ui.checkbox(slider_trailing_fill, "Add trailing color to sliders");
 
         ui.vertical_centered(|ui| reset_button(ui, self));
     }

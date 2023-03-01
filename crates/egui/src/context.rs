@@ -65,14 +65,11 @@ struct ContextImpl {
 
     /// Written to during the frame.
     layer_rects_this_frame: ahash::HashMap<LayerId, Vec<(Id, Rect)>>,
-
     /// Read
     layer_rects_prev_frame: ahash::HashMap<LayerId, Vec<(Id, Rect)>>,
 
     #[cfg(feature = "accesskit")]
     is_accesskit_enabled: bool,
-    #[cfg(feature = "accesskit")]
-    accesskit_node_classes: accesskit::NodeClassSet,
 }
 
 impl ContextImpl {
@@ -106,8 +103,7 @@ impl ContextImpl {
         self.memory.areas.set_state(
             LayerId::background(),
             containers::area::State {
-                pivot_pos: screen_rect.left_top(),
-                pivot: Align2::LEFT_TOP,
+                pos: screen_rect.min,
                 size: screen_rect.size(),
                 interactable: true,
             },
@@ -117,14 +113,17 @@ impl ContextImpl {
         if self.is_accesskit_enabled {
             use crate::frame_state::AccessKitFrameState;
             let id = crate::accesskit_root_id();
-            let mut builder = accesskit::NodeBuilder::new(accesskit::Role::Window);
-            builder.set_transform(accesskit::Affine::scale(
-                self.input.pixels_per_point().into(),
-            ));
-            let mut node_builders = IdMap::default();
-            node_builders.insert(id, builder);
+            let node = Box::new(accesskit::Node {
+                role: accesskit::Role::Window,
+                transform: Some(
+                    accesskit::kurbo::Affine::scale(self.input.pixels_per_point().into()).into(),
+                ),
+                ..Default::default()
+            });
+            let mut nodes = IdMap::default();
+            nodes.insert(id, node);
             self.frame_state.accesskit_state = Some(AccessKitFrameState {
-                node_builders,
+                nodes,
                 parent_stack: vec![id],
             });
         }
@@ -157,16 +156,16 @@ impl ContextImpl {
     }
 
     #[cfg(feature = "accesskit")]
-    fn accesskit_node_builder(&mut self, id: Id) -> &mut accesskit::NodeBuilder {
+    fn accesskit_node(&mut self, id: Id) -> &mut accesskit::Node {
         let state = self.frame_state.accesskit_state.as_mut().unwrap();
-        let builders = &mut state.node_builders;
-        if let std::collections::hash_map::Entry::Vacant(entry) = builders.entry(id) {
+        let nodes = &mut state.nodes;
+        if let std::collections::hash_map::Entry::Vacant(entry) = nodes.entry(id) {
             entry.insert(Default::default());
             let parent_id = state.parent_stack.last().unwrap();
-            let parent_builder = builders.get_mut(parent_id).unwrap();
-            parent_builder.push_child(id.accesskit_id());
+            let parent = nodes.get_mut(parent_id).unwrap();
+            parent.children.push(id.accesskit_id());
         }
-        builders.get_mut(&id).unwrap()
+        nodes.get_mut(&id).unwrap()
     }
 }
 
@@ -565,7 +564,6 @@ impl Context {
                     Stroke::new(1.0, Color32::YELLOW.additive().linear_multiply(0.05)),
                 );
             }
-            let mut show_blocking_widget = None;
 
             self.write(|ctx| {
                 ctx.layer_rects_this_frame
@@ -586,9 +584,16 @@ impl Context {
                                     // so we aren't hovered.
 
                                     if ctx.memory.options.style.debug.show_blocking_widget {
-                                        // Store the rects to use them outside the write() call to
-                                        // avoid deadlock
-                                        show_blocking_widget = Some((interact_rect, prev_rect));
+                                        Self::layer_painter(self, LayerId::debug()).debug_rect(
+                                            interact_rect,
+                                            Color32::GREEN,
+                                            "Covered",
+                                        );
+                                        Self::layer_painter(self, LayerId::debug()).debug_rect(
+                                            prev_rect,
+                                            Color32::LIGHT_BLUE,
+                                            "On top",
+                                        );
                                     }
 
                                     hovered = false;
@@ -599,19 +604,6 @@ impl Context {
                     }
                 }
             });
-
-            if let Some((interact_rect, prev_rect)) = show_blocking_widget {
-                Self::layer_painter(self, LayerId::debug()).debug_rect(
-                    interact_rect,
-                    Color32::GREEN,
-                    "Covered",
-                );
-                Self::layer_painter(self, LayerId::debug()).debug_rect(
-                    prev_rect,
-                    Color32::LIGHT_BLUE,
-                    "On top",
-                );
-            }
         }
 
         self.interact_with_hovered(layer_id, id, rect, sense, enabled, hovered)
@@ -663,7 +655,7 @@ impl Context {
             // Make sure anything that can receive focus has an AccessKit node.
             // TODO(mwcampbell): For nodes that are filled from widget info,
             // some information is written to the node twice.
-            self.accesskit_node_builder(id, |builder| response.fill_accesskit_node_common(builder));
+            self.accesskit_node(id, |node| response.fill_accesskit_node_common(node));
         }
 
         let clicked_elsewhere = response.clicked_elsewhere();
@@ -1136,20 +1128,12 @@ impl Context {
             if let Some(state) = state {
                 let has_focus = self.input(|i| i.raw.has_focus);
                 let root_id = crate::accesskit_root_id().accesskit_id();
-                let nodes = self.write(|ctx| {
-                    state
-                        .node_builders
-                        .into_iter()
-                        .map(|(id, builder)| {
-                            (
-                                id.accesskit_id(),
-                                builder.build(&mut ctx.accesskit_node_classes),
-                            )
-                        })
-                        .collect()
-                });
                 platform_output.accesskit_update = Some(accesskit::TreeUpdate {
-                    nodes,
+                    nodes: state
+                        .nodes
+                        .into_iter()
+                        .map(|(id, node)| (id.accesskit_id(), Arc::from(node)))
+                        .collect(),
                     tree: Some(accesskit::Tree::new(root_id)),
                     focus: has_focus.then(|| {
                         let focus_id = self.memory(|mem| mem.interaction.focus.id);
@@ -1736,8 +1720,8 @@ impl Context {
     }
 
     /// If AccessKit support is active for the current frame, get or create
-    /// a node builder with the specified ID and return a mutable reference to it.
-    /// For newly created nodes, the parent is the node with the ID at the top
+    /// a node with the specified ID and return a mutable reference to it.
+    /// For newly crated nodes, the parent is the node with the ID at the top
     /// of the stack managed by [`Context::with_accessibility_parent`].
     ///
     /// The `Context` lock is held while the given closure is called!
@@ -1745,16 +1729,16 @@ impl Context {
     /// Returns `None` if acesskit is off.
     // TODO: consider making both RO and RW versions
     #[cfg(feature = "accesskit")]
-    pub fn accesskit_node_builder<R>(
+    pub fn accesskit_node<R>(
         &self,
         id: Id,
-        writer: impl FnOnce(&mut accesskit::NodeBuilder) -> R,
+        writer: impl FnOnce(&mut accesskit::Node) -> R,
     ) -> Option<R> {
         self.write(|ctx| {
             ctx.frame_state
                 .accesskit_state
                 .is_some()
-                .then(|| ctx.accesskit_node_builder(id))
+                .then(|| ctx.accesskit_node(id))
                 .map(writer)
         })
     }
@@ -1766,29 +1750,11 @@ impl Context {
     /// being called by the AccessKit adapter to provide the initial tree update,
     /// then it should do so, to provide a complete AccessKit tree to the adapter
     /// immediately. Otherwise, it should enqueue a repaint and use the
-    /// placeholder tree update from [`Context::accesskit_placeholder_tree_update`]
+    /// placeholder tree update from [`crate::accesskit_placeholder_tree_update`]
     /// in the meantime.
     #[cfg(feature = "accesskit")]
     pub fn enable_accesskit(&self) {
         self.write(|ctx| ctx.is_accesskit_enabled = true);
-    }
-
-    /// Return a tree update that the egui integration should provide to the
-    /// AccessKit adapter if it cannot immediately run the egui application
-    /// to get a full tree update after running [`Context::enable_accesskit`].
-    #[cfg(feature = "accesskit")]
-    pub fn accesskit_placeholder_tree_update(&self) -> accesskit::TreeUpdate {
-        use accesskit::{NodeBuilder, Role, Tree, TreeUpdate};
-
-        let root_id = crate::accesskit_root_id().accesskit_id();
-        self.write(|ctx| TreeUpdate {
-            nodes: vec![(
-                root_id,
-                NodeBuilder::new(Role::Window).build(&mut ctx.accesskit_node_classes),
-            )],
-            tree: Some(Tree::new(root_id)),
-            focus: None,
-        })
     }
 }
 

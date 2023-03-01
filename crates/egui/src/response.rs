@@ -573,47 +573,47 @@ impl Response {
             self.output_event(event);
         } else {
             #[cfg(feature = "accesskit")]
-            self.ctx.accesskit_node_builder(self.id, |builder| {
-                self.fill_accesskit_node_from_widget_info(builder, make_info());
+            self.ctx.accesskit_node(self.id, |node| {
+                self.fill_accesskit_node_from_widget_info(node, make_info());
             });
         }
     }
 
     pub fn output_event(&self, event: crate::output::OutputEvent) {
         #[cfg(feature = "accesskit")]
-        self.ctx.accesskit_node_builder(self.id, |builder| {
-            self.fill_accesskit_node_from_widget_info(builder, event.widget_info().clone());
+        self.ctx.accesskit_node(self.id, |node| {
+            self.fill_accesskit_node_from_widget_info(node, event.widget_info().clone());
         });
         self.ctx.output_mut(|o| o.events.push(event));
     }
 
     #[cfg(feature = "accesskit")]
-    pub(crate) fn fill_accesskit_node_common(&self, builder: &mut accesskit::NodeBuilder) {
-        builder.set_bounds(accesskit::Rect {
+    pub(crate) fn fill_accesskit_node_common(&self, node: &mut accesskit::Node) {
+        node.bounds = Some(accesskit::kurbo::Rect {
             x0: self.rect.min.x.into(),
             y0: self.rect.min.y.into(),
             x1: self.rect.max.x.into(),
             y1: self.rect.max.y.into(),
         });
         if self.sense.focusable {
-            builder.add_action(accesskit::Action::Focus);
+            node.focusable = true;
         }
-        if self.sense.click && builder.default_action_verb().is_none() {
-            builder.set_default_action_verb(accesskit::DefaultActionVerb::Click);
+        if self.sense.click && node.default_action_verb.is_none() {
+            node.default_action_verb = Some(accesskit::DefaultActionVerb::Click);
         }
     }
 
     #[cfg(feature = "accesskit")]
     fn fill_accesskit_node_from_widget_info(
         &self,
-        builder: &mut accesskit::NodeBuilder,
+        node: &mut accesskit::Node,
         info: crate::WidgetInfo,
     ) {
         use crate::WidgetType;
         use accesskit::{CheckedState, Role};
 
-        self.fill_accesskit_node_common(builder);
-        builder.set_role(match info.typ {
+        self.fill_accesskit_node_common(node);
+        node.role = match info.typ {
             WidgetType::Label => Role::StaticText,
             WidgetType::Link => Role::Link,
             WidgetType::TextEdit => Role::TextField,
@@ -628,18 +628,18 @@ impl Response {
             WidgetType::DragValue => Role::SpinButton,
             WidgetType::ColorButton => Role::ColorWell,
             WidgetType::Other => Role::Unknown,
-        });
+        };
         if let Some(label) = info.label {
-            builder.set_name(label);
+            node.name = Some(label.into());
         }
         if let Some(value) = info.current_text_value {
-            builder.set_value(value);
+            node.value = Some(value.into());
         }
         if let Some(value) = info.value {
-            builder.set_numeric_value(value);
+            node.numeric_value = Some(value);
         }
         if let Some(selected) = info.selected {
-            builder.set_checked_state(if selected {
+            node.checked_state = Some(if selected {
                 CheckedState::True
             } else {
                 CheckedState::False
@@ -662,9 +662,8 @@ impl Response {
     /// ```
     pub fn labelled_by(self, id: Id) -> Self {
         #[cfg(feature = "accesskit")]
-        self.ctx.accesskit_node_builder(self.id, |builder| {
-            builder.push_labelled_by(id.accesskit_id());
-        });
+        self.ctx
+            .accesskit_node(self.id, |node| node.labelled_by.push(id.accesskit_id()));
         #[cfg(not(feature = "accesskit"))]
         {
             let _ = id;

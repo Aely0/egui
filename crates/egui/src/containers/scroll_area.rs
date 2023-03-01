@@ -74,14 +74,6 @@ pub struct ScrollAreaOutput<R> {
     pub inner_rect: Rect,
 }
 
-/// Indicate whether the horizontal and vertical scroll bars must be always visible, hidden or visible when needed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ScrollBarVisibility {
-    AlwaysVisible,
-    VisibleWhenNeeded,
-    AlwaysHidden,
-}
-
 /// Add vertical and/or horizontal scrolling to a contained [`Ui`].
 ///
 /// ```
@@ -101,7 +93,7 @@ pub struct ScrollArea {
     auto_shrink: [bool; 2],
     max_size: Vec2,
     min_scrolled_size: Vec2,
-    scroll_bar_visibility: ScrollBarVisibility,
+    always_show_scroll: bool,
     id_source: Option<Id>,
     offset_x: Option<f32>,
     offset_y: Option<f32>,
@@ -139,14 +131,14 @@ impl ScrollArea {
     }
 
     /// Create a scroll area where you decide which axis has scrolling enabled.
-    /// For instance, `ScrollArea::new([true, false])` enables horizontal scrolling.
+    /// For instance, `ScrollAre::new([true, false])` enable horizontal scrolling.
     pub fn new(has_bar: [bool; 2]) -> Self {
         Self {
             has_bar,
             auto_shrink: [true; 2],
             max_size: Vec2::INFINITY,
             min_scrolled_size: Vec2::splat(64.0),
-            scroll_bar_visibility: ScrollBarVisibility::AlwaysHidden,
+            always_show_scroll: false,
             id_source: None,
             offset_x: None,
             offset_y: None,
@@ -198,11 +190,10 @@ impl ScrollArea {
         self
     }
 
-    /// Set the visibility of both horizontal and vertical scroll bars.
-    ///
-    /// With `ScrollBarVisibility::VisibleWhenNeeded` (default), the scroll bar will be visible only when needed.
-    pub fn scroll_bar_visibility(mut self, scroll_bar_visibility: ScrollBarVisibility) -> Self {
-        self.scroll_bar_visibility = scroll_bar_visibility;
+    /// If `false` (default), the scroll bar will be hidden when not needed/
+    /// If `true`, the scroll bar will always be displayed even if not needed.
+    pub fn always_show_scroll(mut self, always_show_scroll: bool) -> Self {
+        self.always_show_scroll = always_show_scroll;
         self
     }
 
@@ -337,7 +328,7 @@ struct Prepared {
     /// How much horizontal and vertical space are used up by the
     /// width of the vertical bar, and the height of the horizontal bar?
     current_bar_use: Vec2,
-    scroll_bar_visibility: ScrollBarVisibility,
+    always_show_scroll: bool,
     /// Where on the screen the content is (excludes scroll bars).
     inner_rect: Rect,
     content_ui: Ui,
@@ -355,7 +346,7 @@ impl ScrollArea {
             auto_shrink,
             max_size,
             min_scrolled_size,
-            scroll_bar_visibility,
+            always_show_scroll,
             id_source,
             offset_x,
             offset_y,
@@ -382,7 +373,7 @@ impl ScrollArea {
 
         let current_hscroll_bar_height = if !has_bar[0] {
             0.0
-        } else if scroll_bar_visibility == ScrollBarVisibility::AlwaysVisible {
+        } else if always_show_scroll {
             max_scroll_bar_width
         } else {
             max_scroll_bar_width * ui.ctx().animate_bool(id.with("h"), state.show_scroll[0])
@@ -390,7 +381,7 @@ impl ScrollArea {
 
         let current_vscroll_bar_width = if !has_bar[1] {
             0.0
-        } else if scroll_bar_visibility == ScrollBarVisibility::AlwaysVisible {
+        } else if always_show_scroll {
             max_scroll_bar_width
         } else {
             max_scroll_bar_width * ui.ctx().animate_bool(id.with("v"), state.show_scroll[1])
@@ -510,7 +501,7 @@ impl ScrollArea {
             has_bar,
             auto_shrink,
             current_bar_use,
-            scroll_bar_visibility,
+            always_show_scroll,
             inner_rect,
             content_ui,
             viewport,
@@ -621,7 +612,7 @@ impl Prepared {
             has_bar,
             auto_shrink,
             mut current_bar_use,
-            scroll_bar_visibility,
+            always_show_scroll,
             content_ui,
             viewport: _,
             scrolling_enabled,
@@ -715,13 +706,10 @@ impl Prepared {
             }
         }
 
-        let show_scroll_this_frame = match scroll_bar_visibility {
-            ScrollBarVisibility::AlwaysVisible => [true, true],
-            ScrollBarVisibility::VisibleWhenNeeded => {
-                [content_is_too_large[0], content_is_too_large[1]]
-            }
-            ScrollBarVisibility::AlwaysHidden => [false, false],
-        };
+        let show_scroll_this_frame = [
+            content_is_too_large[0] || always_show_scroll,
+            content_is_too_large[1] || always_show_scroll,
+        ];
 
         let max_scroll_bar_width = max_scroll_bar_width_with_margin(ui);
 

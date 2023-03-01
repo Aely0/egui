@@ -742,7 +742,7 @@ impl Plot {
         });
 
         let PlotMemory {
-            bounds_modified,
+            mut bounds_modified,
             mut hovered_entry,
             mut hidden_items,
             last_screen_transform,
@@ -754,7 +754,6 @@ impl Plot {
             items: Vec::new(),
             next_auto_color_idx: 0,
             last_screen_transform,
-            bounds_modified,
             response,
             ctx: ui.ctx().clone(),
         };
@@ -763,7 +762,6 @@ impl Plot {
             mut items,
             mut response,
             last_screen_transform,
-            mut bounds_modified,
             ..
         } = plot_ui;
 
@@ -1044,7 +1042,6 @@ pub struct PlotUi {
     items: Vec<Box<dyn PlotItem>>,
     next_auto_color_idx: usize,
     last_screen_transform: ScreenTransform,
-    bounds_modified: AxisBools,
     response: Response,
     ctx: Context,
 }
@@ -1072,13 +1069,11 @@ impl PlotUi {
     /// Set the plot bounds. Can be useful for implementing alternative plot navigation methods.
     pub fn set_plot_bounds(&mut self, plot_bounds: PlotBounds) {
         self.last_screen_transform.set_bounds(plot_bounds);
-        self.bounds_modified = true.into();
     }
 
     /// Move the plot bounds. Can be useful for implementing alternative plot navigation methods.
     pub fn translate_bounds(&mut self, delta_pos: Vec2) {
         self.last_screen_transform.translate_bounds(delta_pos);
-        self.bounds_modified = true.into();
     }
 
     /// Returns `true` if the plot area is currently hovered.
